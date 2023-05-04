@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package tag;
+
+option go_package = "/tag";
+
+message User {
+  string id = 1;
+  string name = 2;
+}
+
+message Tag {
+  string id = 1;
+  string name = 2;
+}
+
+message GetTagRequest {
+  string user_id = 1;
+  string tag_id = 2;
+}
+
+message GetTagResponse {
+  repeated Tag tags = 1;
+}
+
+service TagService {
+  rpc GetTags(GetTagRequest) returns (GetTagResponse);
+}
