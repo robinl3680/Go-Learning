@@ -28,10 +28,12 @@ type Response struct {
 }
 
 var rdb *redis.Client
+var db *sql.DB
 
 func main() {
 	// Connect to the database
-	db, err := sql.Open("postgres", "postgres://robin.r:@localhost:5432/people?sslmode=disable")
+	var err error
+	db, err = sql.Open("postgres", "postgres://robin.r:@localhost:5432/people?sslmode=disable")
 	if err != nil {
 		panic(err)
 	}
@@ -53,23 +55,7 @@ func main() {
 	router := gin.Default()
 	router.Use(CORSMiddleware())
 	// Define the routes
-	router.POST("/users", func(c *gin.Context) {
-		var user User
-		if err := c.ShouldBindJSON(&user); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		//using protobuf we are serialising and passing to internal route
-		updatedUserData := mypackage.User{Id: int32(user.ID), Name: user.Name}
-		data, err := proto.Marshal(&updatedUserData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
-			return
-		}
-		//update the body with new serialised data
-		c.Request.Body = ioutil.NopCloser(bytes.NewReader(data))
-		internalHandler(c, db)
-	})
+	router.POST("/users", usersPostHandler, internalHandler)
 
 	router.GET("/users/:id", func(c *gin.Context) {
 		id := c.Param("id")
@@ -156,7 +142,26 @@ func main() {
 }
 
 
-func internalHandler(c *gin.Context, db *sql.DB) {
+func usersPostHandler(c *gin.Context) {
+	var user User
+		if err := c.ShouldBindJSON(&user); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		//using protobuf we are serialising and passing to internal route
+		updatedUserData := mypackage.User{Id: int32(user.ID), Name: user.Name}
+		data, err := proto.Marshal(&updatedUserData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+			return
+		}
+		//update the body with new serialised data
+		c.Request.Body = ioutil.NopCloser(bytes.NewReader(data))
+		c.Next()
+}
+
+
+func internalHandler(c *gin.Context) {
 	//receieve the serialised data and deserialise it store to DB
 	buff, err := ioutil.ReadAll(c.Request.Body)
 	if err != nil {
