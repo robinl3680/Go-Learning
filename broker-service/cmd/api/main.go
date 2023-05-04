@@ -1,8 +1,12 @@
 package main
 
 import (
+	"broker/proto/mypackage"
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
@@ -10,11 +14,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	_ "github.com/lib/pq"
+	"google.golang.org/protobuf/proto"
 )
 
 type User struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID   int    `protobuf:"varint,1,opt,name=id,proto3" json:"id"`
+	Name string `protobuf:"bytes,2,opt,name=id,proto3" json:"name"`
+}
+
+type Response struct {
+	Message string `json:"message"`
+	Error string `json:"error,omitempty"`
 }
 
 var rdb *redis.Client
@@ -42,7 +52,6 @@ func main() {
 	// Create the Gin router and enable CORS
 	router := gin.Default()
 	router.Use(CORSMiddleware())
-
 	// Define the routes
 	router.POST("/users", func(c *gin.Context) {
 		var user User
@@ -50,12 +59,16 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		_, err := db.Exec("INSERT INTO public.user (name) VALUES ($1)", user.Name)
+		//using protobuf we are serialising and passing to internal route
+		updatedUserData := mypackage.User{Id: int32(user.ID), Name: user.Name}
+		data, err := proto.Marshal(&updatedUserData)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"Message": "Successfully added to the DB"})
+		//update the body with new serialised data
+		c.Request.Body = ioutil.NopCloser(bytes.NewReader(data))
+		internalHandler(c, db)
 	})
 
 	router.GET("/users/:id", func(c *gin.Context) {
@@ -142,29 +155,26 @@ func main() {
 	}
 }
 
-// package main
 
-// import (
-// 	"fmt"
-// 	"log"
-// 	"net/http"
-// )
+func internalHandler(c *gin.Context, db *sql.DB) {
+	//receieve the serialised data and deserialise it store to DB
+	buff, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	var user mypackage.User
+	if err := proto.Unmarshal(buff, &user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Println(user.Id, user.Name)
+	_, err = db.Exec("INSERT INTO public.user (name) VALUES ($1)", user.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"Message": "Successfully added to the DB"})
+}
 
-// const webport = "80"
 
-// type Config struct{}
-
-// func main() {
-// 	app := Config{}
-// 	log.Printf("Starting broker server on port %s\n", webport)
-// 	//define server
-// 	srv := &http.Server{
-// 		Addr:    fmt.Sprintf(":%s", webport),
-// 		Handler: app.routes(),
-// 	}
-// 	//start server
-// 	err := srv.ListenAndServe()
-// 	if err != nil {
-// 		log.Panic(err)
-// 	}
-// }
